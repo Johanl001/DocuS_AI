@@ -1,12 +1,13 @@
 gradio
 fastapi
-uvicorn
+uvicorn[standard]
 python-multipart
 langchain
 langchain-huggingface
 langchain-chroma
 langchain-openai
 pydantic
+orjson
 python-dotenv
 pytesseract
 pillow
