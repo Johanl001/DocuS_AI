@@ -1,0 +1,13 @@
+gradio
+fastapi
+uvicorn
+python-multipart
+langchain
+langchain-huggingface
+langchain-chroma
+langchain-openai
+pydantic
+python-dotenv
+pytesseract
+pillow
+pymupdf
