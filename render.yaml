@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: docsense-api
+    env: docker
+    plan: starter
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: WEB_CONCURRENCY
+        value: "2"
+    disk:
+      name: chroma-db
+      mountPath: /app/chroma_db
+      sizeGB: 1
