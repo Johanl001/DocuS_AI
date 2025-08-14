@@ -11,3 +11,5 @@ python-dotenv
 pytesseract
 pillow
 pymupdf
+# ... other dependencies
+gunicorn
