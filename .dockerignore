@@ -1,0 +1,22 @@
+# VCS
+.git
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.log
+
+# Envs
+.env
+.env.*
+
+# Data / build artifacts
+chroma_db/
+docs/
+*.ipynb
+
+# Editors
+.vscode/
+.idea/
