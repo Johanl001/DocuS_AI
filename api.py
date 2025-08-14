@@ -53,57 +53,65 @@ class OCRResponseModel(BaseModel):
 # Initialize FastAPI
 app = FastAPI()
 
-# --- Initialize Global Resources ---
-try:
-    # Embeddings rely on a local Hugging Face model
-    logger.info("Initializing embeddings...")
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-    
-    # Use the updated Chroma class
-    logger.info("Initializing Chroma database...")
-    db = Chroma(persist_directory=CHROMA_PATH, embedding_function=embeddings)
-    
-    # Check if OPENROUTER_API_KEY is available
-    openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
-    if not openrouter_api_key:
-        logger.warning("OPENROUTER_API_KEY not found in environment variables. Please add it to your .env file.")
-        # You can set a default or raise an error here
-        openrouter_api_key = "your_openrouter_api_key_here"  # Replace with actual key
-    
-    # LLM uses ChatOpenAI client configured for OpenRouter
-    logger.info("Initializing LLM...")
-    llm = ChatOpenAI(
-        openai_api_base="https://openrouter.ai/api/v1",
-        openai_api_key=openrouter_api_key,
-        model="openai/gpt-oss-20b:free",
-        temperature=0.3,
-    )
-    
-    # --- Define the LLM Chains and Prompts ---
-    logger.info("Setting up retrieval chain...")
-    retriever = db.as_retriever()
-    retriever_prompt = ChatPromptTemplate.from_messages([("user", "{input}"),])
-    retrieval_chain = create_history_aware_retriever(llm, retriever, retriever_prompt)
-    
-    prompt = ChatPromptTemplate.from_messages([
-        ("system",
-            "You are an expert claims officer. Your task is to evaluate a claim based on the provided documents. "
-            "Your final response must be a JSON object with 'decision', 'amount', 'justification', and 'clauses_used'. "
-            "Justify the decision by referencing the specific clauses from the documents. "
-            "The decision must be 'Approved', 'Rejected', or 'Approved with conditions'. "
-            "The amount should be a numeric value if applicable, otherwise 'N/A'. "
-            "Context: {context}"
-        ),
-        ("user", "{input}")
-    ])
-    document_chain = create_stuff_documents_chain(llm, prompt)
-    rag_chain = create_retrieval_chain(retrieval_chain, document_chain)
-    
-    logger.info("All components initialized successfully!")
-    
-except Exception as e:
-    logger.error(f"Error during initialization: {str(e)}")
-    raise
+# --- Lazily initialized global resources ---
+embeddings = None
+vector_db = None
+llm = None
+rag_chain = None
+
+
+def initialize_pipeline() -> None:
+    """Lazily initialize heavy ML components on first use to keep startup fast."""
+    global embeddings, vector_db, llm, rag_chain
+    if rag_chain is not None:
+        return
+
+    try:
+        logger.info("Initializing embeddings and vector store...")
+        embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+        vector_db = Chroma(persist_directory=CHROMA_PATH, embedding_function=embeddings)
+
+        openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+        if not openrouter_api_key:
+            logger.warning("OPENROUTER_API_KEY not set. RAG queries may fail until it's provided.")
+
+        logger.info("Initializing LLM client...")
+        llm_client = ChatOpenAI(
+            openai_api_base="https://openrouter.ai/api/v1",
+            openai_api_key=openrouter_api_key,
+            model="openai/gpt-oss-20b:free",
+            temperature=0.3,
+        )
+
+        logger.info("Setting up retrieval chain...")
+        retriever = vector_db.as_retriever()
+        retriever_prompt = ChatPromptTemplate.from_messages([("user", "{input}")])
+        history_aware_retriever = create_history_aware_retriever(llm_client, retriever, retriever_prompt)
+
+        prompt = ChatPromptTemplate.from_messages([
+            ("system",
+                "You are an expert claims officer. Your task is to evaluate a claim based on the provided documents. "
+                "Your final response must be a JSON object with 'decision', 'amount', 'justification', and 'clauses_used'. "
+                "Justify the decision by referencing the specific clauses from the documents. "
+                "The decision must be 'Approved', 'Rejected', or 'Approved with conditions'. "
+                "The amount should be a numeric value if applicable, otherwise 'N/A'. "
+                "Context: {context}"
+            ),
+            ("user", "{input}")
+        ])
+        document_chain = create_stuff_documents_chain(llm_client, prompt)
+        rag_chain = create_retrieval_chain(history_aware_retriever, document_chain)
+
+        # Assign to globals last to avoid half-initialized state on failure
+        globals()["llm"] = llm_client
+        globals()["rag_chain"] = rag_chain
+
+        logger.info("Pipeline initialized successfully.")
+
+    except Exception as e:
+        logger.error(f"Error during pipeline initialization: {str(e)}")
+        raise
+
 
 def extract_text_from_pdf_with_ocr(pdf_path):
     """Extracts text from a PDF, performing OCR on scanned pages."""
@@ -162,7 +170,10 @@ async def process_query(query_model: QueryModel):
         # Check if query is not empty
         if not query_model.query.strip():
             raise HTTPException(status_code=400, detail="Query cannot be empty")
-        
+
+        # Ensure pipeline is ready
+        initialize_pipeline()
+
         response = rag_chain.invoke({"input": query_model.query})
         
         llm_output_str = response.get("answer", "{}")
