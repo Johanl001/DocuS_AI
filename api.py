@@ -71,17 +71,37 @@ def initialize_pipeline() -> None:
         embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         vector_db = Chroma(persist_directory=CHROMA_PATH, embedding_function=embeddings)
 
+        # Choose LLM provider based on env vars; prefer explicit LLM_PROVIDER
+        provider = os.getenv("LLM_PROVIDER")
         openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
-        if not openrouter_api_key:
-            logger.warning("OPENROUTER_API_KEY not set. RAG queries may fail until it's provided.")
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not provider:
+            provider = "openrouter" if openrouter_api_key else ("openai" if openai_api_key else "none")
 
-        logger.info("Initializing LLM client...")
-        llm_client = ChatOpenAI(
-            openai_api_base="https://openrouter.ai/api/v1",
-            openai_api_key=openrouter_api_key,
-            model="openai/gpt-oss-20b:free",
-            temperature=0.3,
-        )
+        if provider == "openrouter":
+            if not openrouter_api_key:
+                raise RuntimeError("OPENROUTER_API_KEY is not set. Set it in your environment.")
+            logger.info("Initializing LLM client via OpenRouter...")
+            llm_client = ChatOpenAI(
+                openai_api_base="https://openrouter.ai/api/v1",
+                openai_api_key=openrouter_api_key,
+                model=os.getenv("OPENROUTER_MODEL", "openai/gpt-oss-20b:free"),
+                temperature=0.3,
+            )
+        elif provider == "openai":
+            if not openai_api_key:
+                raise RuntimeError("OPENAI_API_KEY is not set. Set it in your environment.")
+            logger.info("Initializing LLM client via OpenAI...")
+            llm_client = ChatOpenAI(
+                openai_api_key=openai_api_key,
+                model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+                temperature=0.3,
+            )
+        else:
+            logger.warning("No LLM provider configured. Set OPENROUTER_API_KEY or OPENAI_API_KEY.")
+            globals()["llm"] = None
+            globals()["rag_chain"] = None
+            return
 
         logger.info("Setting up retrieval chain...")
         retriever = vector_db.as_retriever()
@@ -173,6 +193,14 @@ async def process_query(query_model: QueryModel):
 
         # Ensure pipeline is ready
         initialize_pipeline()
+        if rag_chain is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "LLM not configured. Set OPENROUTER_API_KEY for OpenRouter or OPENAI_API_KEY for OpenAI. "
+                    "Optionally set LLM_PROVIDER to 'openrouter' or 'openai'."
+                ),
+            )
 
         response = rag_chain.invoke({"input": query_model.query})
         
@@ -228,6 +256,10 @@ async def process_query(query_model: QueryModel):
         # Re-raise HTTP exceptions as they are already properly formatted
         raise
     except Exception as e:
+        # Surface a clearer error when upstream returns 401 Unauthorized
+        if "401" in str(e) or "Unauthorized" in str(e):
+            logger.error("LLM provider unauthorized. Check API key configuration.")
+            raise HTTPException(status_code=502, detail="LLM provider unauthorized. Check API key configuration.")
         logger.error(f"Unexpected error processing query: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
