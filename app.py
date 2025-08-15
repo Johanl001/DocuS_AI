@@ -1,4 +1,10 @@
 import gradio as gr
+from api import app as fastapi_app
+try:
+    from asgiref.wsgi import AsgiToWsgi
+    app = AsgiToWsgi(fastapi_app)
+except Exception:
+    app = fastapi_app
 
 def create_interface():
     with gr.Blocks(title="DocuSense AI") as demo:

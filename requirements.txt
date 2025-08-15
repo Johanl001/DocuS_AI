@@ -13,3 +13,4 @@ pillow
 pymupdf
 # ... other dependencies
 gunicorn
+asgiref
