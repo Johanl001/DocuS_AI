@@ -2,11 +2,12 @@ import gradio as gr
 import pytesseract
 from PIL import Image
 import fitz
+import json
 
 def ocr_process(file):
     import os
     if not file:
-        return {"error": "No file provided"}
+        return json.dumps({"error": "No file provided"})
     # Gradio may pass a dict, a tempfile object, or a path string
     path = None
     if isinstance(file, dict):
@@ -16,7 +17,7 @@ def ocr_process(file):
     elif isinstance(file, str):
         path = file
     if not path or not os.path.exists(path):
-        return {"error": "Invalid file input"}
+        return json.dumps({"error": "Invalid file input"})
     try:
         doc = fitz.open(path)
         text_content = ""
@@ -53,7 +54,7 @@ def ocr_process(file):
                     })
         ocr_pages = [d for d in ocr_details if d["method"] == "ocr"]
         regular_pages = [d for d in ocr_details if d["method"] == "regular_text"]
-        return {
+        payload = {
             "filename": os.path.basename(path),
             "total_pages": len(ocr_details),
             "pages_with_regular_text": len(regular_pages),
@@ -62,8 +63,9 @@ def ocr_process(file):
             "sample_text": text_content[:1000] if text_content else "No text extracted",
             "ocr_details": ocr_details
         }
+        return json.dumps(payload, indent=2)
     except Exception as e:
-        return {"error": str(e)}
+        return json.dumps({"error": str(e)})
 
 
 def create_interface():
@@ -73,22 +75,23 @@ def create_interface():
         with gr.Tab("Query Documents"):
             query_input = gr.Textbox(label="Enter your query", placeholder="What is the coverage for medical expenses?")
             submit_btn = gr.Button("Submit Query")
-            output = gr.JSON(label="Response")
+            output = gr.Code(label="Response (JSON)", language="json")
 
             def process_query(query):
-                return {
+                data = {
                     "decision": "Approved",
                     "amount": "1000",
                     "justification": "Sample response",
                     "clauses_used": ["Sample clause"]
                 }
+                return json.dumps(data, indent=2)
 
             submit_btn.click(process_query, inputs=query_input, outputs=output)
 
         with gr.Tab("OCR Demo"):
             gr.Markdown("Upload a PDF to test OCR functionality")
             file_input = gr.File(label="Upload PDF", file_types=[".pdf"])
-            ocr_output = gr.JSON(label="OCR Results")
+            ocr_output = gr.Code(label="OCR Results (JSON)", language="json")
             file_input.change(ocr_process, inputs=file_input, outputs=ocr_output)
 
     return demo
