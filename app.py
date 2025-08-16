@@ -75,7 +75,7 @@ def create_interface():
         with gr.Tab("Query Documents"):
             query_input = gr.Textbox(label="Enter your query", placeholder="What is the coverage for medical expenses?")
             submit_btn = gr.Button("Submit Query")
-            output = gr.Code(label="Response (JSON)", language="json")
+            output = gr.Textbox(label="Response (JSON)", lines=12)
 
             def process_query(query):
                 data = {
@@ -90,8 +90,8 @@ def create_interface():
 
         with gr.Tab("OCR Demo"):
             gr.Markdown("Upload a PDF to test OCR functionality")
-            file_input = gr.File(label="Upload PDF", file_types=[".pdf"])
-            ocr_output = gr.Code(label="OCR Results (JSON)", language="json")
+            file_input = gr.File(label="Upload PDF", file_types=[".pdf"], type="filepath")
+            ocr_output = gr.Textbox(label="OCR Results (JSON)", lines=18)
             file_input.change(ocr_process, inputs=file_input, outputs=ocr_output)
 
     return demo
